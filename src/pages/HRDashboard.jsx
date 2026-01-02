@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { User } from "@/entities/User";
 import { createPageUrl } from "@/utils";
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   FileText,
   Clock,
@@ -18,7 +18,16 @@ import {
   Building,
   MapPin,
   LayoutList,
-  LayoutGrid
+  LayoutGrid,
+  Shield,
+  BookOpen,
+  TrendingUp,
+  TrendingDown,
+  Users,
+  Settings,
+  BarChart3,
+  Target,
+  AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +64,11 @@ export default function HRDashboard() {
   const [filterPriority, setFilterPriority] = useState("Todas");
   const [viewMode, setViewMode] = useState("list"); // "list" ou "kanban"
   const navigate = useNavigate();
+  
+  // Estados para métricas adicionais
+  const [contents, setContents] = useState([]);
+  const [complaints, setComplaints] = useState([]);
+  const [showMetrics, setShowMetrics] = useState(true);
 
   const categories = [
     "Todas",
@@ -105,13 +119,17 @@ export default function HRDashboard() {
 
   const loadData = async () => {
     try {
-      const [requestsData, usersData] = await Promise.all([
+      const [requestsData, usersData, contentsData, complaintsData] = await Promise.all([
         base44.entities.HRRequest.list("-created_date"),
-        base44.entities.User.list()
+        base44.entities.User.list(),
+        base44.entities.Content.list(),
+        base44.entities.AnonymousComplaint.list()
       ]);
       
       setRequests(requestsData);
       setUsers(usersData);
+      setContents(contentsData);
+      setComplaints(complaintsData);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
     }
@@ -388,20 +406,285 @@ export default function HRDashboard() {
     );
   };
 
+  // Calcular métricas
+  const mandatoryContents = contents.filter(c => c.is_mandatory);
+  const totalMandatory = mandatoryContents.length;
+  const totalUsers = users.length;
+  
+  const completionByDept = {};
+  users.forEach(user => {
+    const dept = user.department || 'Sem Departamento';
+    if (!completionByDept[dept]) {
+      completionByDept[dept] = { total: 0, completed: 0 };
+    }
+    completionByDept[dept].total++;
+    
+    mandatoryContents.forEach(content => {
+      if (content.completed_by && content.completed_by.includes(user.email)) {
+        completionByDept[dept].completed++;
+      }
+    });
+  });
+
+  const lowAdoptionCourses = mandatoryContents
+    .map(c => ({
+      ...c,
+      completionRate: ((c.completed_by?.length || 0) / totalUsers) * 100
+    }))
+    .filter(c => c.completionRate < 50)
+    .sort((a, b) => a.completionRate - b.completionRate)
+    .slice(0, 5);
+
+  const complaintsByCategory = {};
+  complaints.forEach(c => {
+    complaintsByCategory[c.category] = (complaintsByCategory[c.category] || 0) + 1;
+  });
+
+  const complaintsByStatus = {};
+  complaints.forEach(c => {
+    complaintsByStatus[c.status] = (complaintsByStatus[c.status] || 0) + 1;
+  });
+
   return (
     <div className="space-y-6">
-      {/* Header Simplificado */}
+      {/* Header com Toggle de Métricas */}
       <div className="glass-card p-6 md:p-8 rounded-2xl">
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-            <FileText className="w-8 h-8 text-white" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+              <BarChart3 className="w-8 h-8 text-white" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold glass-text">Dashboard RH</h1>
+              <p className="glass-text-muted mt-1 text-lg">Painel de Controle e Métricas</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl font-bold glass-text">Dashboard RH</h1>
-            <p className="glass-text-muted mt-1 text-lg">Gestão de Solicitações dos Colaboradores</p>
-          </div>
+          <Button
+            onClick={() => setShowMetrics(!showMetrics)}
+            className="glass-button-secondary"
+          >
+            {showMetrics ? 'Ocultar Métricas' : 'Mostrar Métricas'}
+          </Button>
         </div>
       </div>
+
+      {/* NOVO: Painel de Métricas */}
+      {showMetrics && (
+        <div className="space-y-6">
+          {/* 1. Visão Geral de Solicitações */}
+          <div className="glass-card p-6 rounded-2xl">
+            <h2 className="text-xl font-bold glass-text mb-4 flex items-center gap-2">
+              <FileText className="w-6 h-6 text-blue-600" />
+              Solicitações de RH - Visão Geral
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="text-center p-4 glass rounded-xl bg-orange-50">
+                <div className="text-3xl font-bold text-orange-600">{pendingRequests.length}</div>
+                <div className="text-sm font-semibold text-orange-800 mt-1">Pendentes</div>
+              </div>
+              <div className="text-center p-4 glass rounded-xl bg-yellow-50">
+                <div className="text-3xl font-bold text-yellow-600">{inAnalysisRequests.length}</div>
+                <div className="text-sm font-semibold text-yellow-800 mt-1">Em Análise</div>
+              </div>
+              <div className="text-center p-4 glass rounded-xl bg-green-50">
+                <div className="text-3xl font-bold text-green-600">{approvedRequests.length}</div>
+                <div className="text-sm font-semibold text-green-800 mt-1">Aprovadas</div>
+              </div>
+              <div className="text-center p-4 glass rounded-xl bg-red-50">
+                <div className="text-3xl font-bold text-red-600">{rejectedRequests.length}</div>
+                <div className="text-sm font-semibold text-red-800 mt-1">Rejeitadas</div>
+              </div>
+              <div className="text-center p-4 glass rounded-xl bg-blue-50">
+                <div className="text-3xl font-bold text-blue-600">{completedRequests.length}</div>
+                <div className="text-sm font-semibold text-blue-800 mt-1">Concluídas</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Estatísticas de Treinamentos Obrigatórios */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="glass-card p-6 rounded-2xl">
+              <h2 className="text-xl font-bold glass-text mb-4 flex items-center gap-2">
+                <BookOpen className="w-6 h-6 text-purple-600" />
+                Treinamentos Obrigatórios
+              </h2>
+              
+              <div className="mb-5 p-4 glass rounded-xl bg-purple-50">
+                <div className="text-4xl font-bold text-purple-600">{totalMandatory}</div>
+                <div className="text-sm font-semibold text-purple-800 mt-1">Cursos Obrigatórios Ativos</div>
+              </div>
+
+              <h3 className="font-bold text-gray-900 mb-3 text-sm">Conclusão por Departamento</h3>
+              <div className="space-y-3">
+                {Object.entries(completionByDept).map(([dept, stats]) => {
+                  const percentage = (stats.completed / (stats.total * totalMandatory)) * 100;
+                  return (
+                    <div key={dept}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-semibold text-gray-900">{dept}</span>
+                        <span className="text-sm font-bold text-blue-600">{percentage.toFixed(0)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all ${
+                            percentage >= 75 ? 'bg-green-500' :
+                            percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="glass-card p-6 rounded-2xl">
+              <h2 className="text-xl font-bold glass-text mb-4 flex items-center gap-2">
+                <TrendingDown className="w-6 h-6 text-orange-600" />
+                Cursos com Baixa Adesão
+              </h2>
+              
+              {lowAdoptionCourses.length > 0 ? (
+                <div className="space-y-4">
+                  {lowAdoptionCourses.map(course => (
+                    <div key={course.id} className="glass p-4 rounded-xl border-2 border-orange-200">
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <h4 className="font-bold text-gray-900 text-sm flex-1 line-clamp-2">{course.title}</h4>
+                        <Badge className="bg-orange-100 text-orange-800 flex-shrink-0">
+                          {course.completionRate.toFixed(0)}%
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        <span>{course.completed_by?.length || 0} de {totalUsers} concluíram</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
+                        <div
+                          className="bg-orange-500 h-1.5 rounded-full"
+                          style={{ width: `${course.completionRate}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <Target className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                  <p className="text-green-700 font-semibold">Ótimo trabalho!</p>
+                  <p className="text-sm text-gray-600 mt-1">Todos os cursos têm boa adesão</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 3. Resumo de Denúncias Anônimas */}
+          <div className="glass-card p-6 rounded-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold glass-text flex items-center gap-2">
+                <Shield className="w-6 h-6 text-red-600" />
+                Denúncias Anônimas - Resumo
+              </h2>
+              <Link to={createPageUrl("Admin")}>
+                <Button className="glass-button-secondary text-sm">
+                  Gerenciar Denúncias
+                </Button>
+              </Link>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="font-bold text-gray-900 mb-3 text-sm">Por Status de Investigação</h3>
+                <div className="space-y-2">
+                  {Object.entries(complaintsByStatus).map(([status, count]) => (
+                    <div key={status} className="flex items-center justify-between p-3 glass rounded-lg">
+                      <span className="text-sm font-semibold text-gray-900">{status}</span>
+                      <Badge className={
+                        status === 'Resolvida' ? 'bg-green-100 text-green-800' :
+                        status === 'Em Investigação' ? 'bg-orange-100 text-orange-800' :
+                        status === 'Nova' ? 'bg-blue-100 text-blue-800' :
+                        'bg-gray-100 text-gray-800'
+                      }>
+                        {count}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-gray-900 mb-3 text-sm">Por Categoria</h3>
+                <div className="space-y-2">
+                  {Object.entries(complaintsByCategory).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([category, count]) => (
+                    <div key={category} className="flex items-center justify-between p-3 glass rounded-lg">
+                      <span className="text-sm font-semibold text-gray-900">{category}</span>
+                      <Badge variant="outline">{count}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 p-4 glass rounded-xl bg-red-50 border-2 border-red-200">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+                <span className="font-bold text-red-900">
+                  {complaints.filter(c => c.status === 'Nova' || c.status === 'Em Análise').length} denúncias aguardando ação
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Acesso Rápido - Gestão */}
+          <div className="glass-card p-6 rounded-2xl">
+            <h2 className="text-xl font-bold glass-text mb-4 flex items-center gap-2">
+              <Settings className="w-6 h-6 text-indigo-600" />
+              Acesso Rápido - Gerenciamento
+            </h2>
+
+            <div className="grid md:grid-cols-3 gap-4">
+              <Link to={createPageUrl("Admin")}>
+                <div className="glass-card p-5 rounded-xl hover:scale-105 transition-all cursor-pointer bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200">
+                  <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center mb-3">
+                    <Users className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 mb-1">Usuários e Permissões</h3>
+                  <p className="text-sm text-gray-700">Gerenciar acessos e papéis</p>
+                  <div className="mt-3 text-2xl font-bold text-blue-600">{users.length}</div>
+                </div>
+              </Link>
+
+              <Link to={createPageUrl("Admin")}>
+                <div className="glass-card p-5 rounded-xl hover:scale-105 transition-all cursor-pointer bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-200">
+                  <div className="w-12 h-12 rounded-xl bg-purple-600 flex items-center justify-center mb-3">
+                    <BookOpen className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 mb-1">Conteúdos e Cursos</h3>
+                  <p className="text-sm text-gray-700">Gerenciar material de treinamento</p>
+                  <div className="mt-3 text-2xl font-bold text-purple-600">{contents.length}</div>
+                </div>
+              </Link>
+
+              <Link to={createPageUrl("Admin")}>
+                <div className="glass-card p-5 rounded-xl hover:scale-105 transition-all cursor-pointer bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200">
+                  <div className="w-12 h-12 rounded-xl bg-red-600 flex items-center justify-center mb-3">
+                    <Shield className="w-6 h-6 text-white" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 mb-1">Denúncias e Compliance</h3>
+                  <p className="text-sm text-gray-700">Canal de ética e investigações</p>
+                  <div className="mt-3 text-2xl font-bold text-red-600">{complaints.length}</div>
+                </div>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Divisor */}
+      {showMetrics && (
+        <div className="glass-card p-6 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600">
+          <h2 className="text-2xl font-bold text-white text-center">Solicitações de RH</h2>
+        </div>
+      )}
 
       {/* Stats Cards - UMA ÚNICA COR AZUL */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
