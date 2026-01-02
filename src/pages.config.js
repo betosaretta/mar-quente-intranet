@@ -1,45 +1,47 @@
-import Dashboard from './pages/Dashboard';
-import Announcements from './pages/Announcements';
-import HRRequests from './pages/HRRequests';
-import Contents from './pages/Contents';
-import Ideas from './pages/Ideas';
-import Suggestions from './pages/Suggestions';
-import Recognition from './pages/Recognition';
 import Admin from './pages/Admin';
-import Tickets from './pages/Tickets';
-import Contacts from './pages/Contacts';
-import MQNews from './pages/MQNews';
-import CustomForms from './pages/CustomForms';
+import Announcements from './pages/Announcements';
 import AnonymousComplaint from './pages/AnonymousComplaint';
-import Messaging from './pages/Messaging';
+import Contacts from './pages/Contacts';
+import Contents from './pages/Contents';
+import CustomForms from './pages/CustomForms';
+import Dashboard from './pages/Dashboard';
 import HRDashboard from './pages/HRDashboard';
-import PerformanceReviews from './pages/PerformanceReviews';
+import HRRequests from './pages/HRRequests';
+import Home from './pages/Home';
+import Ideas from './pages/Ideas';
+import MQNews from './pages/MQNews';
 import Manuals from './pages/Manuals';
-import VacationManagement from './pages/VacationManagement';
+import Messaging from './pages/Messaging';
+import PerformanceReviews from './pages/PerformanceReviews';
+import Recognition from './pages/Recognition';
 import RecruitmentKanban from './pages/RecruitmentKanban';
+import Suggestions from './pages/Suggestions';
+import Tickets from './pages/Tickets';
+import VacationManagement from './pages/VacationManagement';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
-    "Dashboard": Dashboard,
-    "Announcements": Announcements,
-    "HRRequests": HRRequests,
-    "Contents": Contents,
-    "Ideas": Ideas,
-    "Suggestions": Suggestions,
-    "Recognition": Recognition,
     "Admin": Admin,
-    "Tickets": Tickets,
-    "Contacts": Contacts,
-    "MQNews": MQNews,
-    "CustomForms": CustomForms,
+    "Announcements": Announcements,
     "AnonymousComplaint": AnonymousComplaint,
-    "Messaging": Messaging,
+    "Contacts": Contacts,
+    "Contents": Contents,
+    "CustomForms": CustomForms,
+    "Dashboard": Dashboard,
     "HRDashboard": HRDashboard,
-    "PerformanceReviews": PerformanceReviews,
+    "HRRequests": HRRequests,
+    "Home": Home,
+    "Ideas": Ideas,
+    "MQNews": MQNews,
     "Manuals": Manuals,
-    "VacationManagement": VacationManagement,
+    "Messaging": Messaging,
+    "PerformanceReviews": PerformanceReviews,
+    "Recognition": Recognition,
     "RecruitmentKanban": RecruitmentKanban,
+    "Suggestions": Suggestions,
+    "Tickets": Tickets,
+    "VacationManagement": VacationManagement,
 }
 
 export const pagesConfig = {

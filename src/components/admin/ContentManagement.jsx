@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -97,11 +96,38 @@ export default function ContentManagement() {
 
   const handleSave = async () => {
     try {
+      let savedContent;
+      
       if (editingContent) {
         await base44.entities.Content.update(editingContent.id, newContent);
+        savedContent = { ...editingContent, ...newContent };
       } else {
-        await base44.entities.Content.create(newContent);
+        savedContent = await base44.entities.Content.create(newContent);
       }
+
+      // AUTOMAÇÃO: Se curso obrigatório, criar tarefas para gestores
+      if (newContent.is_mandatory && (newContent.content_type === 'Curso' || newContent.category.includes('Treinamento'))) {
+        const leaders = await base44.entities.User.filter({ 
+          team_members: { $exists: true, $ne: [] } 
+        });
+
+        const tasksToCreate = leaders.map(leader => ({
+          title: `Garantir Conclusão de Curso Obrigatório - ${newContent.title}`,
+          description: `Garantir que todos os membros da sua equipe completem o curso obrigatório: "${newContent.title}". Acompanhar e reportar conclusões.`,
+          category: "Treinamento",
+          status: "Pendente",
+          priority: "Alta",
+          assigned_to: leader.email,
+          related_entity_type: "Content",
+          related_entity_id: savedContent.id,
+          due_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        }));
+
+        if (tasksToCreate.length > 0) {
+          await base44.entities.Task.bulkCreate(tasksToCreate);
+        }
+      }
+
       setShowNewDialog(false);
       setEditingContent(null);
       setNewContent({
@@ -113,8 +139,8 @@ export default function ContentManagement() {
         brand: "Todas",
         is_mandatory: false,
         file_url: "",
-        canva_link: "", // Reset new field
-        quiz_id: "",     // Reset new field
+        canva_link: "",
+        quiz_id: "",
         thumbnail_url: ""
       });
       await loadContents();

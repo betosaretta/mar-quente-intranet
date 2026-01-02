@@ -265,17 +265,46 @@ export default function HRRequests() {
         priorityLevel = "Urgente"; // Forçar prioridade urgente
       }
 
+      // Definir prazo baseado na categoria
+      let dueDate = newRequest.due_date;
+      
+      // AUTOMAÇÃO: Acidente de Trabalho = 48h de prazo
+      if (newRequest.category === "Acidente de Trabalho") {
+        dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      }
+
       const requestData = {
         ...newRequest,
         description: newRequest.description || JSON.stringify(newRequest.form_data, null, 2),
         visibility_level: visibilityLevel,
         assigned_to: assignedTo,
-        priority: priorityLevel
+        priority: priorityLevel,
+        due_date: dueDate
       };
 
       const createdRequest = await HRRequest.create(requestData);
 
-      // Se for solicitação de desligamento, criar tarefa automática para o RH
+      // AUTOMAÇÕES PÓS-CRIAÇÃO
+      
+      // 1. Acidente de Trabalho - Criar tarefa urgente para Segurança do Trabalho
+      if (newRequest.category === "Acidente de Trabalho") {
+        const safetyUsers = allUsers.filter(u => u.department === 'Segurança do Trabalho');
+        if (safetyUsers.length > 0) {
+          await base44.entities.Task.create({
+            title: `⚠️ URGENTE - Investigar Acidente de Trabalho`,
+            description: `Investigar acidente envolvendo ${newRequest.form_data.victim_name || 'colaborador'}. Local: ${newRequest.form_data.location}. Gravidade: ${newRequest.form_data.severity}. Solicitação #${createdRequest.id}`,
+            category: "RH",
+            status: "Pendente",
+            priority: "Urgente",
+            assigned_to: safetyUsers[0].email,
+            related_entity_type: "HRRequest",
+            related_entity_id: createdRequest.id,
+            due_date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+          });
+        }
+      }
+
+      // 2. Solicitação Desligamento - Criar tarefa para RH
       if (newRequest.category === "Solicitação Desligamento") {
         const rhUsers = allUsers.filter(u => u.department === 'RH');
         if (rhUsers.length > 0) {
@@ -289,6 +318,44 @@ export default function HRRequests() {
             related_entity_type: "HRRequest",
             related_entity_id: createdRequest.id,
             due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+          });
+        }
+      }
+
+      // 3. Alteração Cargo/Salário - Criar tarefa para RH aprovar
+      if (newRequest.category === "Alteração Cargo/Salário") {
+        const rhUsers = allUsers.filter(u => u.department === 'RH');
+        if (rhUsers.length > 0) {
+          await base44.entities.Task.create({
+            title: `Aprovar Alteração de Cargo/Salário`,
+            description: `Revisar e aprovar alteração de cargo/salário para ${newRequest.form_data.employee_email}. Solicitação #${createdRequest.id}`,
+            category: "RH",
+            status: "Pendente",
+            priority: "Alta",
+            assigned_to: rhUsers[0].email,
+            related_entity_type: "HRRequest",
+            related_entity_id: createdRequest.id,
+            due_date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+          });
+        }
+      }
+
+      // 4. Autorização Hora Extra - Requer aprovação do líder
+      if (newRequest.category === "Autorização Hora Extra") {
+        const leaderUser = allUsers.find(u => 
+          u.team_members && u.team_members.includes(user.email)
+        );
+        if (leaderUser) {
+          await base44.entities.Task.create({
+            title: `Aprovar Hora Extra - ${newRequest.form_data.employee_name}`,
+            description: `Autorizar hora extra solicitada para ${newRequest.form_data.overtime_date}. Solicitação #${createdRequest.id}`,
+            category: "RH",
+            status: "Pendente",
+            priority: "Normal",
+            assigned_to: leaderUser.email,
+            related_entity_type: "HRRequest",
+            related_entity_id: createdRequest.id,
+            due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
           });
         }
       }
