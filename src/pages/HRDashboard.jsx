@@ -69,6 +69,13 @@ export default function HRDashboard() {
   const [contents, setContents] = useState([]);
   const [complaints, setComplaints] = useState([]);
   const [showMetrics, setShowMetrics] = useState(true);
+  
+  // Estados para tarefas
+  const [tasks, setTasks] = useState([]);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [taskNotes, setTaskNotes] = useState("");
+  const [filterTaskStatus, setFilterTaskStatus] = useState("Pendente");
 
   const categories = [
     "Todas",
@@ -119,17 +126,20 @@ export default function HRDashboard() {
 
   const loadData = async () => {
     try {
-      const [requestsData, usersData, contentsData, complaintsData] = await Promise.all([
+      const user = await base44.auth.me();
+      const [requestsData, usersData, contentsData, complaintsData, tasksData] = await Promise.all([
         base44.entities.HRRequest.list("-created_date"),
         base44.entities.User.list(),
         base44.entities.Content.list(),
-        base44.entities.AnonymousComplaint.list()
+        base44.entities.AnonymousComplaint.list(),
+        base44.entities.Task.filter({ assigned_to: user.email }, "-created_date")
       ]);
       
       setRequests(requestsData);
       setUsers(usersData);
       setContents(contentsData);
       setComplaints(complaintsData);
+      setTasks(tasksData);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
     }
@@ -166,6 +176,36 @@ export default function HRDashboard() {
       await loadData();
     } catch (error) {
       console.error("Erro ao salvar resposta:", error);
+    }
+  };
+
+  const handleCompleteTask = async (taskId, notes) => {
+    try {
+      await base44.entities.Task.update(taskId, {
+        status: "Concluída",
+        description: selectedTask.description + (notes ? `\n\n--- Notas de Conclusão ---\n${notes}` : ''),
+        completed_date: new Date().toISOString().split('T')[0]
+      });
+      setShowTaskDialog(false);
+      setSelectedTask(null);
+      setTaskNotes("");
+      await loadData();
+    } catch (error) {
+      console.error("Erro ao concluir tarefa:", error);
+    }
+  };
+
+  const navigateToRelated = (task) => {
+    if (task.related_entity_type === 'HRRequest') {
+      // Scroll para a solicitação ou abrir modal
+      const element = document.getElementById(`request-${task.related_entity_id}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('animate-pulse');
+        setTimeout(() => element.classList.remove('animate-pulse'), 2000);
+      }
+    } else if (task.related_entity_type === 'Content') {
+      navigate(createPageUrl("Contents"));
     }
   };
 
@@ -301,7 +341,7 @@ export default function HRDashboard() {
 
     // Versão completa para Lista
     return (
-      <div className="glass-card p-5 rounded-2xl hover:shadow-xl transition-all border-l-4 border-blue-500">
+      <div id={`request-${request.id}`} className="glass-card p-5 rounded-2xl hover:shadow-xl transition-all border-l-4 border-blue-500">
         {/* Informações do Solicitante - DESTAQUE */}
         <div className="glass-card p-4 rounded-xl bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 mb-4">
           <div className="flex items-start gap-3">
@@ -679,6 +719,98 @@ export default function HRDashboard() {
         </div>
       )}
 
+      {/* NOVO: Seção Minhas Tarefas */}
+      <div className="glass-card p-6 rounded-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold glass-text flex items-center gap-2">
+            <CheckCircle className="w-6 h-6 text-green-600" />
+            Minhas Tarefas
+          </h2>
+          <div className="flex gap-2">
+            {['Pendente', 'Em Andamento', 'Concluída'].map(status => (
+              <Button
+                key={status}
+                onClick={() => setFilterTaskStatus(status)}
+                size="sm"
+                className={filterTaskStatus === status ? 'glass-button-primary' : 'glass-button-secondary'}
+              >
+                {status}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {tasks.filter(t => filterTaskStatus === 'Concluída' ? t.status === 'Concluída' : t.status !== 'Concluída').length > 0 ? (
+            tasks.filter(t => filterTaskStatus === 'Concluída' ? t.status === 'Concluída' : (filterTaskStatus === 'Pendente' ? t.status === 'Pendente' : t.status === 'Em Andamento')).map(task => (
+              <div key={task.id} className="glass-card p-5 rounded-xl border-l-4 border-green-500">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <h3 className="font-bold text-gray-900 text-base flex-1">{task.title}</h3>
+                  <Badge className={
+                    task.priority === 'Urgente' ? 'bg-red-100 text-red-800' :
+                    task.priority === 'Alta' ? 'bg-orange-100 text-orange-800' :
+                    'bg-blue-100 text-blue-800'
+                  }>
+                    {task.priority}
+                  </Badge>
+                </div>
+
+                <p className="text-sm text-gray-700 mb-3 line-clamp-3">{task.description}</p>
+
+                <div className="flex items-center gap-2 mb-3">
+                  <Badge variant="outline" className="text-xs">{task.category}</Badge>
+                  <Badge className={
+                    task.status === 'Concluída' ? 'bg-green-100 text-green-800' :
+                    task.status === 'Em Andamento' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-gray-100 text-gray-800'
+                  }>
+                    {task.status}
+                  </Badge>
+                </div>
+
+                {task.due_date && (
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-orange-600 mb-3">
+                    <Clock className="w-3.5 h-3.5" />
+                    Prazo: {format(new Date(task.due_date), "dd/MM/yyyy", { locale: ptBR })}
+                  </div>
+                )}
+
+                {task.related_entity_type && (
+                  <Button
+                    onClick={() => navigateToRelated(task)}
+                    size="sm"
+                    variant="outline"
+                    className="w-full mb-2 text-xs"
+                  >
+                    Ver {task.related_entity_type === 'HRRequest' ? 'Solicitação' : 'Conteúdo'}
+                  </Button>
+                )}
+
+                {task.status !== 'Concluída' && (
+                  <Button
+                    onClick={() => {
+                      setSelectedTask(task);
+                      setTaskNotes("");
+                      setShowTaskDialog(true);
+                    }}
+                    size="sm"
+                    className="glass-button-primary w-full"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Concluir Tarefa
+                  </Button>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="col-span-full text-center py-8 glass rounded-xl">
+              <Target className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+              <p className="text-gray-600 font-semibold">Nenhuma tarefa {filterTaskStatus.toLowerCase()}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Divisor */}
       {showMetrics && (
         <div className="glass-card p-6 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600">
@@ -965,6 +1097,74 @@ export default function HRDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog: Concluir Tarefa */}
+      {selectedTask && (
+        <Dialog open={showTaskDialog} onOpenChange={setShowTaskDialog}>
+          <DialogContent className="glass-modal max-w-2xl">
+            <DialogHeader>
+              <h2 className="modal-title">Concluir Tarefa</h2>
+              <p className="modal-description">{selectedTask.title}</p>
+            </DialogHeader>
+
+            <div className="space-y-5 p-6">
+              <div className="glass-card p-4 rounded-xl bg-blue-50">
+                <h3 className="font-bold text-blue-900 mb-2">Descrição da Tarefa</h3>
+                <p className="text-sm text-blue-800">{selectedTask.description}</p>
+              </div>
+
+              {selectedTask.related_entity_type && (
+                <div className="glass-card p-4 rounded-xl bg-purple-50">
+                  <h3 className="font-bold text-purple-900 mb-2">Relacionado a</h3>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{selectedTask.related_entity_type}</Badge>
+                    <Button
+                      onClick={() => navigateToRelated(selectedTask)}
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                    >
+                      Ver Detalhes
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label className="glass-label">Notas de Conclusão (Opcional)</Label>
+                <Textarea
+                  value={taskNotes}
+                  onChange={(e) => setTaskNotes(e.target.value)}
+                  className="glass-textarea"
+                  rows={4}
+                  placeholder="Adicione notas sobre como a tarefa foi concluída, resultados obtidos, etc..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowTaskDialog(false);
+                    setSelectedTask(null);
+                    setTaskNotes("");
+                  }}
+                  className="glass-button-secondary"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => handleCompleteTask(selectedTask.id, taskNotes)}
+                  className="glass-button-primary"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Marcar como Concluída
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
