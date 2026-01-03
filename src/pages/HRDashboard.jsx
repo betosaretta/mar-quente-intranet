@@ -76,6 +76,13 @@ export default function HRDashboard() {
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [taskNotes, setTaskNotes] = useState("");
   const [filterTaskStatus, setFilterTaskStatus] = useState("Pendente");
+  
+  // Estados para aprovação
+  const [showApprovalDialog, setShowApprovalDialog] = useState(false);
+  const [selectedApproval, setSelectedApproval] = useState(null);
+  const [approvalAction, setApprovalAction] = useState(""); // "aprovar" ou "rejeitar"
+  const [approvalComments, setApprovalComments] = useState("");
+  const [approvalQueue, setApprovalQueue] = useState("gestor"); // "gestor" ou "rh"
 
   const categories = [
     "Todas",
@@ -209,6 +216,61 @@ export default function HRDashboard() {
     }
   };
 
+  const requiresHierarchicalApproval = (category) => {
+    return ['Alteração Cargo/Salário', 'Solicitação Desligamento', 'Autorização Hora Extra'].includes(category);
+  };
+
+  const handleApprovalAction = async () => {
+    if (!approvalComments.trim()) {
+      alert("Por favor, adicione uma justificativa para sua decisão.");
+      return;
+    }
+
+    try {
+      const isLeader = approvalQueue === 'gestor';
+      const updateData = {};
+      const flowEntry = {
+        step: isLeader ? 'Aprovação Gestor' : 'Aprovação RH',
+        approver: currentUser.email,
+        action: approvalAction === 'aprovar' ? 'Aprovado' : 'Rejeitado',
+        comments: approvalComments,
+        date: new Date().toISOString()
+      };
+
+      if (isLeader) {
+        updateData.leader_approved = approvalAction === 'aprovar';
+        updateData.leader_email = currentUser.email;
+        updateData.leader_comments = approvalComments;
+        updateData.leader_decision_date = new Date().toISOString();
+        updateData.status = approvalAction === 'aprovar' ? 'Aprovado pelo Gestor' : 'Rejeitado pelo Gestor';
+      } else {
+        updateData.status = approvalAction === 'aprovar' ? 'Aprovado' : 'Rejeitado';
+        updateData.hr_comments = approvalComments;
+        updateData.hr_decision_date = new Date().toISOString();
+        updateData.hr_approver_email = currentUser.email;
+      }
+
+      updateData.approval_flow = [...(selectedApproval.approval_flow || []), flowEntry];
+
+      await base44.entities.HRRequest.update(selectedApproval.id, updateData);
+      
+      setShowApprovalDialog(false);
+      setSelectedApproval(null);
+      setApprovalComments("");
+      setApprovalAction("");
+      await loadData();
+    } catch (error) {
+      console.error("Erro ao processar aprovação:", error);
+    }
+  };
+
+  const handleOpenApproval = (request, action) => {
+    setSelectedApproval(request);
+    setApprovalAction(action);
+    setApprovalComments("");
+    setShowApprovalDialog(true);
+  };
+
   const handleDragEnd = async (result) => {
     const { source, destination, draggableId } = result;
 
@@ -267,10 +329,24 @@ export default function HRDashboard() {
   }
 
   const pendingRequests = requests.filter(r => r.status === 'Pendente');
-  const inAnalysisRequests = requests.filter(r => r.status === 'Em Análise');
+  const inAnalysisRequests = requests.filter(r => r.status === 'Em Análise' || r.status === 'Em Análise RH');
   const approvedRequests = requests.filter(r => r.status === 'Aprovado');
   const completedRequests = requests.filter(r => r.status === 'Concluído');
-  const rejectedRequests = requests.filter(r => r.status === 'Rejeitado');
+  const rejectedRequests = requests.filter(r => r.status === 'Rejeitado' || r.status === 'Rejeitado pelo Gestor');
+  
+  // Filas de aprovação
+  const isManager = currentUser && currentUser.team_members && currentUser.team_members.length > 0;
+  const managerApprovalQueue = requests.filter(r => 
+    requiresHierarchicalApproval(r.category) &&
+    (r.status === 'Aguardando Aprovação Gestor' || r.status === 'Pendente') &&
+    isManager &&
+    currentUser.team_members.includes(r.created_by)
+  );
+  
+  const hrApprovalQueue = requests.filter(r => 
+    r.status === 'Aprovado pelo Gestor' || 
+    (r.status === 'Pendente' && !requiresHierarchicalApproval(r.category))
+  );
 
   const filteredRequests = requests.filter(request => {
     const userInfo = getUserInfo(request.created_by);
@@ -719,6 +795,107 @@ export default function HRDashboard() {
         </div>
       )}
 
+      {/* NOVO: Fila de Aprovações */}
+      {(isManager || (currentUser && (currentUser.department === 'RH' || currentUser.role === 'admin'))) && (
+        <div className="glass-card p-6 rounded-2xl">
+          <h2 className="text-xl font-bold glass-text mb-4 flex items-center gap-2">
+            <Target className="w-6 h-6 text-orange-600" />
+            Fila de Aprovações
+          </h2>
+
+          <div className="flex gap-2 mb-4">
+            {isManager && (
+              <Button
+                onClick={() => setApprovalQueue("gestor")}
+                className={approvalQueue === "gestor" ? "glass-button-primary" : "glass-button-secondary"}
+              >
+                Aprovações Gestor ({managerApprovalQueue.length})
+              </Button>
+            )}
+            {(currentUser.department === 'RH' || currentUser.role === 'admin') && (
+              <Button
+                onClick={() => setApprovalQueue("rh")}
+                className={approvalQueue === "rh" ? "glass-button-primary" : "glass-button-secondary"}
+              >
+                Aprovações RH ({hrApprovalQueue.length})
+              </Button>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {(approvalQueue === "gestor" ? managerApprovalQueue : hrApprovalQueue).length > 0 ? (
+              (approvalQueue === "gestor" ? managerApprovalQueue : hrApprovalQueue).map(request => {
+                const userInfo = getUserInfo(request.created_by);
+                return (
+                  <div key={request.id} className="glass-card p-4 rounded-xl border-l-4 border-orange-500">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Avatar className="w-8 h-8">
+                            <AvatarImage src={userInfo.avatar_url} />
+                            <AvatarFallback className="bg-gradient-to-r from-blue-400 to-purple-500 text-white font-bold text-xs">
+                              {userInfo.full_name?.charAt(0) || '?'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-sm">{request.title}</h3>
+                            <p className="text-xs text-gray-600">{userInfo.full_name}</p>
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-700 mb-2 line-clamp-2">{request.description}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">{request.category}</Badge>
+                          <Badge className={getPriorityColor(request.priority)} size="sm">
+                            {request.priority}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+
+                    {request.approval_flow && request.approval_flow.length > 0 && (
+                      <div className="glass p-3 rounded-lg mb-3 bg-blue-50">
+                        <h4 className="font-bold text-blue-900 text-xs mb-2">Histórico de Aprovações</h4>
+                        {request.approval_flow.map((entry, idx) => (
+                          <div key={idx} className="text-xs text-blue-800 mb-1">
+                            <strong>{entry.step}:</strong> {entry.action} por {users.find(u => u.email === entry.approver)?.full_name || entry.approver}
+                            {entry.comments && <div className="italic mt-1">"{entry.comments}"</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => handleOpenApproval(request, 'aprovar')}
+                        size="sm"
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Aprovar
+                      </Button>
+                      <Button
+                        onClick={() => handleOpenApproval(request, 'rejeitar')}
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 border-red-500 text-red-600 hover:bg-red-50"
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        Rejeitar
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-center py-8 glass rounded-xl">
+                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3 opacity-50" />
+                <p className="text-gray-600 font-semibold">Nenhuma solicitação aguardando aprovação</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* NOVO: Seção Minhas Tarefas */}
       <div className="glass-card p-6 rounded-2xl">
         <div className="flex items-center justify-between mb-4">
@@ -1159,6 +1336,142 @@ export default function HRDashboard() {
                 >
                   <CheckCircle className="w-4 h-4 mr-2" />
                   Marcar como Concluída
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Dialog: Aprovação/Rejeição */}
+      {selectedApproval && (
+        <Dialog open={showApprovalDialog} onOpenChange={setShowApprovalDialog}>
+          <DialogContent className="glass-modal max-w-3xl">
+            <DialogHeader>
+              <h2 className="modal-title">
+                {approvalAction === 'aprovar' ? '✅ Aprovar' : '❌ Rejeitar'} Solicitação
+              </h2>
+              <p className="modal-description">{selectedApproval.title}</p>
+            </DialogHeader>
+
+            <div className="space-y-5 p-6">
+              {/* Info do Solicitante */}
+              <div className="glass-card p-4 rounded-xl bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200">
+                <div className="flex items-center gap-4">
+                  <Avatar className="w-12 h-12">
+                    <AvatarImage src={getUserInfo(selectedApproval.created_by).avatar_url} />
+                    <AvatarFallback className="bg-gradient-to-r from-blue-400 to-purple-500 text-white font-bold">
+                      {getUserInfo(selectedApproval.created_by).full_name?.charAt(0) || '?'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h3 className="font-bold text-gray-900">{getUserInfo(selectedApproval.created_by).full_name}</h3>
+                    <p className="text-sm text-gray-700">{getUserInfo(selectedApproval.created_by).position}</p>
+                    <p className="text-xs text-gray-600">{getUserInfo(selectedApproval.created_by).department}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Descrição */}
+              <div className="glass-card p-4 rounded-xl bg-gray-50">
+                <h3 className="font-bold text-gray-900 mb-2 text-sm">Descrição da Solicitação</h3>
+                <p className="text-sm text-gray-800 whitespace-pre-wrap">{selectedApproval.description}</p>
+              </div>
+
+              {/* Histórico de Aprovações */}
+              {selectedApproval.approval_flow && selectedApproval.approval_flow.length > 0 && (
+                <div className="glass-card p-4 rounded-xl bg-blue-50 border-2 border-blue-200">
+                  <h3 className="font-bold text-blue-900 mb-3 text-sm">Histórico de Aprovações</h3>
+                  <div className="space-y-2">
+                    {selectedApproval.approval_flow.map((entry, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-sm">
+                        <div className="flex-shrink-0 w-2 h-2 rounded-full bg-blue-600 mt-1.5"></div>
+                        <div className="flex-1">
+                          <div className="font-bold text-blue-900">{entry.step}: {entry.action}</div>
+                          <div className="text-xs text-blue-800">
+                            Por {users.find(u => u.email === entry.approver)?.full_name || entry.approver} em{' '}
+                            {format(new Date(entry.date), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                          </div>
+                          {entry.comments && (
+                            <div className="mt-1 p-2 bg-white rounded text-xs italic text-gray-700">
+                              "{entry.comments}"
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Campo de Justificativa OBRIGATÓRIA */}
+              <div className={`glass-card p-4 rounded-xl border-2 ${
+                approvalAction === 'aprovar' ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'
+              }`}>
+                <Label className="glass-label flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-4 h-4 text-orange-600" />
+                  Justificativa OBRIGATÓRIA *
+                </Label>
+                <Textarea
+                  value={approvalComments}
+                  onChange={(e) => setApprovalComments(e.target.value)}
+                  className="glass-textarea"
+                  rows={4}
+                  placeholder={
+                    approvalAction === 'aprovar'
+                      ? "Explique os motivos da aprovação, próximos passos, condições..."
+                      : "Explique os motivos da rejeição, o que pode ser melhorado..."
+                  }
+                  required
+                />
+                <p className="text-xs font-semibold text-gray-700 mt-2">
+                  ⚠️ Este campo é obrigatório para documentar a decisão
+                </p>
+              </div>
+
+              {/* Alert */}
+              <div className={`p-4 rounded-xl ${
+                approvalAction === 'aprovar' ? 'bg-green-100' : 'bg-red-100'
+              }`}>
+                <p className="text-sm font-bold text-gray-900">
+                  {approvalAction === 'aprovar' 
+                    ? '✅ Ao aprovar, a solicitação seguirá para a próxima etapa do fluxo.'
+                    : '❌ Ao rejeitar, a solicitação será encerrada e o colaborador será notificado.'}
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowApprovalDialog(false);
+                    setSelectedApproval(null);
+                    setApprovalComments("");
+                    setApprovalAction("");
+                  }}
+                  className="glass-button-secondary"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleApprovalAction}
+                  disabled={!approvalComments.trim()}
+                  className={approvalAction === 'aprovar' 
+                    ? 'bg-green-600 hover:bg-green-700 text-white' 
+                    : 'bg-red-600 hover:bg-red-700 text-white'
+                  }
+                >
+                  {approvalAction === 'aprovar' ? (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Confirmar Aprovação
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4 mr-2" />
+                      Confirmar Rejeição
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
